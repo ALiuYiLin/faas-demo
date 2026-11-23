@@ -1,29 +1,26 @@
-import type { DecoratorLike } from "./types";
+import { registerRoute } from "../container/metadata";
+import type { MethodDecoratorLike } from "./types";
 
 /**
  * 声明一个 GET 路由（Spring 风格 `@GetMapping`）。
  *
- * ⚠️ 当前仅声明签名，不做任何注册。
+ * 只记录元数据，实际注册由 `mount()` 完成。
  *
- * @param path 路由路径，如 `"/list"`，默认 `"/"`
+ * @param path 路由路径，如 `"/list"`；留空表示控制器根路径
  */
-export function Get(path = "/"): DecoratorLike {
-  return () => {
-    // TODO: 把 { method: "GET", path } 收进方法元数据
-    void path;
+export function Get(path = "/"): MethodDecoratorLike {
+  return (target, key) => {
+    registerRoute(target.constructor, "get", path, key);
   };
 }
 
 /**
  * 声明一个 POST 路由（Spring 风格 `@PostMapping`）。
  *
- * ⚠️ 当前仅声明签名，不做任何注册。
- *
- * @param path 路由路径，如 `"/create"`，默认 `"/"`
+ * @param path 路由路径，如 `"/create"`；留空表示控制器根路径
  */
-export function Post(path = "/"): DecoratorLike {
-  return () => {
-    // TODO: 把 { method: "POST", path } 收进方法元数据
-    void path;
+export function Post(path = "/"): MethodDecoratorLike {
+  return (target, key) => {
+    registerRoute(target.constructor, "post", path, key);
   };
 }

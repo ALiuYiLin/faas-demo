@@ -1,8 +1,18 @@
 /**
- * 装饰器统一签名。
+ * 装饰器签名（legacy / experimentalDecorators 语义）。
  *
- * 这里刻意用宽松的 `any`：目前只声明、不实现语义，所以不约束 target / context 的具体类型。
- * 同时把 `context` 设为可选，既能用于 TS 标准装饰器（默认，无需 experimentalDecorators），
- * 也能在开启 `experimentalDecorators` 的 legacy 模式下通过类型检查。
+ * 用宽松的 `any` 是因为装饰器自身不参与业务类型推导，只负责把元数据写进注册表。
  */
-export type DecoratorLike = (target: any, context?: any) => void;
+
+/** 类装饰器：`@Controller("/users")`、`@Service()` */
+export type ClassDecoratorLike = (target: any) => void;
+
+/** 方法装饰器：`@Get("/list")`、`@Post("/create")`（legacy 下 target 是原型） */
+export type MethodDecoratorLike = (
+  target: any,
+  propertyKey: string | symbol,
+  descriptor?: any,
+) => void;
+
+/** 属性装饰器：`@Resource`、`@Resource("name")` */
+export type PropertyDecoratorLike = (target: any, propertyKey: string | symbol) => void;

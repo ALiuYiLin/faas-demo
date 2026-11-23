@@ -1,15 +1,16 @@
-import type { DecoratorLike } from "./types";
+import { registerBean } from "../container/metadata";
+import type { ClassDecoratorLike } from "./types";
 
 /**
- * 标记一个类为服务（Spring 风格 `@Service`）。
+ * 标记一个类为 bean（Spring 风格 `@Service`）。
  *
- * ⚠️ 当前仅声明签名，不做任何注册（之后可接入 IOC 容器）。
+ * bean 名约定：去掉 `Impl` 后缀后首字母小写，
+ * 所以 `UserServiceImpl` 注册为 `userService`，正好能被 `@Resource userService` 注入。
  *
- * @param name 服务名，缺省用类名
+ * @param name 显式指定 bean 名，缺省走上面的约定
  */
-export function Service(name?: string): DecoratorLike {
-  return () => {
-    // TODO: 把 name 收进元数据，供 IOC 容器注册
-    void name;
+export function Service(name?: string): ClassDecoratorLike {
+  return (target) => {
+    registerBean(target, name);
   };
 }
