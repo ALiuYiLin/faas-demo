@@ -1,0 +1,15 @@
+import { Controller, Get, Resource } from "../decorators";
+import type { UserService } from "../service/UserService";
+
+
+
+@Controller("/users")
+export class UserController {
+  @Resource
+  private userService!: UserService;
+
+  @Get('/list')
+  list(){
+    return this.userService.list()
+  }
+}

@@ -50,6 +50,9 @@ export async function codeTransform(code: string): Promise<string> {
       esbuild({
         target: "es2022",
         tsconfig: false, // 单文件转译，不读项目 tsconfig
+        // 与项目 tsconfig 的 experimentalDecorators 保持一致：legacy 装饰器语义
+        // （标准装饰器语义是 (value, context)，legacy 是 (target, key, descriptor)，两者不通用）
+        tsconfigRaw: { compilerOptions: { experimentalDecorators: true } },
         sourceMap: false,
       }),
     ],
@@ -121,7 +124,7 @@ export class HotLoader {
   currentRouter: Router | null = null
   currentFileMd5: string | null = null
   async checkAndSwap(){
-    const filePath = './src/router/index.ts'
+    const filePath = path.join(import.meta.dirname, "router/index.ts");
     const code = await readFile(filePath, "utf8");
     const md5 = crypto.createHash('md5').update(code,'utf-8').digest('hex')
     if(md5 !== this.currentFileMd5){

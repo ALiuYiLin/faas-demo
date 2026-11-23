@@ -1,5 +1,5 @@
 import express from "express";
-import { HotLoader } from "./hot-loader.js";
+import { HotLoader } from "./hot-loader";
 
 const app = express();
 const port = Number(process.env.PORT ?? 3000);
@@ -14,12 +14,12 @@ app.listen(port, () => {
 
 
 app.use('/api',async (req, res, next)=>{
-  const loader = new HotLoader()
-  await loader.init()
-  const router = loader.getRouter()
-  if (!router) {
-    return res.status(503).json({ error: 'business module not ready' });
-  }
-  router(req, res, next)
+  // const loader = new HotLoader()
+  // await loader.init()
+  // const router = loader.getRouter()
+  // if (!router) {
+  //   return res.status(503).json({ error: 'business module not ready' });
+  // }
+  // router(req, res, next)
 })
 
