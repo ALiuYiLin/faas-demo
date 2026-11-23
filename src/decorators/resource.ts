@@ -1,4 +1,4 @@
-import { registerInject } from "../container/metadata";
+import { registerInject } from "@/container/metadata";
 import type { PropertyDecoratorLike } from "./types";
 
 /**

@@ -1,4 +1,4 @@
-import { registerBean } from "../container/metadata";
+import { registerBean } from "@/container/metadata";
 import type { ClassDecoratorLike } from "./types";
 
 /**

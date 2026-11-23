@@ -1,4 +1,4 @@
-import { registerController } from "../container/metadata";
+import { registerController } from "@/container/metadata";
 import type { ClassDecoratorLike } from "./types";
 
 /**

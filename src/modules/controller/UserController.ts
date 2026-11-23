@@ -1,4 +1,4 @@
-import { Controller, Get, Resource } from "../../decorators";
+import { Controller, Get, Resource } from "@/decorators";
 import type { UserService } from "@/modules/service/UserService";
 
 

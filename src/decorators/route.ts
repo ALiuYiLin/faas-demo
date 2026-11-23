@@ -1,4 +1,4 @@
-import { registerRoute } from "../container/metadata";
+import { registerRoute } from "@/container/metadata";
 import type { MethodDecoratorLike } from "./types";
 
 /**

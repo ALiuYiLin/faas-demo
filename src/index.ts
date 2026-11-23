@@ -1,7 +1,7 @@
 import express, { type ErrorRequestHandler } from "express";
-import { mount } from "./container";
-import { UserController } from "./modules/controller/UserController";
-import { UserServiceImpl } from "./modules/service/impl/UserServiceImpl";
+import { mount } from "@/container";
+import { UserController } from "@/modules/controller/UserController";
+import { UserServiceImpl } from "@/modules/service/impl/UserServiceImpl";
 
 const app = express();
 const port = Number(process.env.PORT ?? 3000);
