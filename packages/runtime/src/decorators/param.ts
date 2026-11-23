@@ -1,4 +1,4 @@
-import { registerParam } from "@/runtime/context";
+import { registerParam } from "../context";
 import type { ParameterDecoratorLike } from "./types";
 
 /** 参数装饰器只能用在方法参数上；构造参数需要 constructor 注入，暂不支持 */

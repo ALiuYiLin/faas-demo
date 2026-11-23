@@ -1,4 +1,4 @@
-import { registerRoute } from "@/runtime/context";
+import { registerRoute } from "../context";
 import type { MethodDecoratorLike } from "./types";
 
 /**

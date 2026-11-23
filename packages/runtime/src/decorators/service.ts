@@ -1,5 +1,5 @@
-import { appContext } from "@/runtime/app-context";
-import { beanName } from "@/runtime/context";
+import { appContext } from "../app-context";
+import { beanName } from "../context";
 import type { ClassDecoratorLike } from "./types";
 
 /**

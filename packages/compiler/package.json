@@ -1,0 +1,21 @@
+{
+  "name": "@faas/compiler",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Build-time compiler: rollup bundles modules to CJS and emits the manifest",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@faas/core": "workspace:*",
+    "rollup": "^4.68.8",
+    "rollup-plugin-esbuild": "^6.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2"
+  }
+}

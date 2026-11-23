@@ -1,4 +1,4 @@
-import { registerController } from "@/runtime/context";
+import { registerController } from "../context";
 import type { ClassDecoratorLike } from "./types";
 
 /**

@@ -2,28 +2,18 @@
   "name": "faas-demo",
   "version": "0.1.0",
   "private": true,
-  "description": "Minimal TypeScript + Express service exposing a health endpoint",
   "type": "module",
+  "description": "Hot-loadable module platform demo (workspace root)",
   "scripts": {
-    "dev": "vite-node src/index.ts",
-    "start": "vite-node src/index.ts",
-    "build:modules": "vite-node src/build/cli.ts",
-    "typecheck": "tsc --noEmit"
+    "dev": "pnpm --filter @faas/demo-server dev",
+    "start": "pnpm --filter @faas/demo-server start",
+    "build:modules": "pnpm --filter @faas/demo-server build:modules",
+    "typecheck": "pnpm -r typecheck"
   },
   "engines": {
     "node": ">=20"
   },
-  "dependencies": {
-    "express": "^5.3.0"
-  },
   "devDependencies": {
-    "@types/express": "^5.0.6",
-    "@types/node": "^24.19.2",
-    "crypto": "^1.0.1",
-    "rollup": "^4.68.8",
-    "rollup-plugin-esbuild": "^6.2.1",
-    "typescript": "^5.9.3",
-    "vite": "^8.3.8",
-    "vite-node": "^6.0.0"
+    "typescript": "^5.9.3"
   }
 }

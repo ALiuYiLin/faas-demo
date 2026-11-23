@@ -1,0 +1,22 @@
+{
+  "name": "@faas/runtime",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Runtime contract for hot-loadable modules: decorators, metadata registry and controller router factory",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./internal": "./src/internal.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "express": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "express": "^5.3.0",
+    "@types/node": "^24.19.2"
+  }
+}

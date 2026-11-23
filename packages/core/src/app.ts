@@ -1,4 +1,4 @@
-import express, { type ErrorRequestHandler } from "express";
+import express, { type ErrorRequestHandler, type Express } from "express";
 import type { Registry } from "./registry";
 
 export interface AppOptions {
@@ -7,11 +7,14 @@ export interface AppOptions {
    * 传 `""` 或 `"/"` 表示挂在根路径。
    */
   basePath?: string;
+  /** 观测接口路径，默认 `/__admin/modules`；传 `false` 关闭 */
+  adminPath?: string | false;
 }
 
-export function createApp(registry: Registry, options: AppOptions = {}): express.Express {
+export function createApp(registry: Registry, options: AppOptions = {}): Express {
   const app = express();
   const basePath = normalizeBasePath(options.basePath ?? "/api");
+  const adminPath = options.adminPath === false ? null : (options.adminPath ?? "/__admin/modules");
 
   app.use(express.json());
 
@@ -19,18 +22,15 @@ export function createApp(registry: Registry, options: AppOptions = {}): express
     res.json({ status: "ok" });
   });
 
-  // 观测面：当前加载的产物版本 / 路由（不受 basePath 影响）
-  app.get("/__admin/modules", (_req, res) => {
-    res.json({ basePath, ...(registry.describe() as Record<string, unknown>) });
-  });
+  if (adminPath) {
+    app.get(adminPath, (_req, res) => {
+      res.json({ basePath, ...(registry.describe() as Record<string, unknown>) });
+    });
+  }
 
-  // 路由表只挂这一个中间件，换版靠 registry 内部替换 composed。
-  // 用 express 的挂载路径来剥前缀：composed 里的路由仍是 controller 自带的绝对路径。
-  const dispatch = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    registry.handle(req, res, next);
-  };
-  if (basePath) app.use(basePath, dispatch);
-  else app.use(dispatch);
+  // 路由表只挂这一个中间件，换版靠 registry 内部替换 composed
+  if (basePath) app.use(basePath, registry.handle);
+  else app.use(registry.handle);
 
   const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
     const message = err instanceof Error ? err.message : String(err);

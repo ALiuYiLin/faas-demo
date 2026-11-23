@@ -1,4 +1,4 @@
-import { registerInject } from "@/runtime/context";
+import { registerInject } from "../context";
 import type { PropertyDecoratorLike } from "./types";
 
 /**
