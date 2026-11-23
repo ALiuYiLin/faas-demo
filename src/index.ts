@@ -1,40 +1,21 @@
-import express, { type ErrorRequestHandler } from "express";
-import { HotLoader } from "@/hot-loader";
+import { buildAll, readManifest } from "@/build/artifact";
+import { createApp } from "@/server/app";
+import { Registry } from "@/server/registry";
 
-const app = express();
 const port = Number(process.env.PORT ?? 3000);
 
-app.use(express.json());
+// 没有 manifest 就全量构建一次（开发期最省事；线上应该只读预构建产物）
+const manifest = (await readManifest()) ?? (await buildAll());
 
-app.get("/health", (_req, res) => {
-  res.json({ status: "ok" });
-});
+const registry = new Registry(manifest);
+await registry.loadAll();
 
-// 控制器通过热加载入口（src/router/index.ts）装配：
-// loader 会把 `@/` 和相对导入的源码打包进 vm 沙箱执行，
-// 装饰器写入的仍是宿主这份元数据注册表（@/decorators、@/container 被映射回宿主实例）。
-const loader = new HotLoader();
-await loader.checkAndSwap().catch((error) => {
-  console.error("[hot-loader] 首次编译失败:", error);
-});
-
-app.use("/api", async (req, res, next) => {
-  const router = loader.getRouter();
-  if (!router) {
-    res.status(503).json({ error: "business module not ready" });
-    return;
-  }
-  router(req, res, next);
-});
-
-// 统一错误出口：控制器里抛出的异常都以 JSON 返回
-const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
-  const message = err instanceof Error ? err.message : String(err);
-  console.error("[app] 未处理异常:", err);
-  res.status(500).json({ error: message });
-};
-app.use(errorHandler);
-
+const app = createApp(registry, { basePath: process.env.BASE_PATH ?? "/api" });
 app.listen(port, () => {
-  console.log(`listening on http://localhost:${port}`);
+  console.log(`listening on http://localhost:${port}${process.env.BASE_PATH ?? "/api"}`);
 });
+
+if (process.env.WATCH !== "0") {
+  registry.startWatching();
+  console.log("[registry] watching src/modules（WATCH=0 可关闭）");
+}

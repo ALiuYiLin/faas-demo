@@ -5,8 +5,9 @@
   "description": "Minimal TypeScript + Express service exposing a health endpoint",
   "type": "module",
   "scripts": {
-    "dev": "vite-node --watch src/index.ts",
+    "dev": "vite-node src/index.ts",
     "start": "vite-node src/index.ts",
+    "build:modules": "vite-node src/build/cli.ts",
     "typecheck": "tsc --noEmit"
   },
   "engines": {

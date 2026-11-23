@@ -6,7 +6,8 @@
     "moduleResolution": "Bundler",
     "noEmit": true,
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@faas/runtime": ["./src/runtime/index.ts"]
     },
     "experimentalDecorators": true,
     "strict": true,

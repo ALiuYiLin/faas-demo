@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Resource } from "@/decorators";
+import { Body, Controller, Get, Param, Post, Resource, controllerRouter } from "@faas/runtime";
 import type { CreateUserInput, User } from "@/modules/entity/User";
 import type { UserService } from "@/modules/service/UserService";
 
@@ -22,3 +22,5 @@ export class UserController {
     return this.userService.create(input);
   }
 }
+
+export default controllerRouter(UserController);

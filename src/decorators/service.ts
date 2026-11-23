@@ -1,4 +1,5 @@
-import { registerBean } from "@/container/metadata";
+import { appContext } from "@/runtime/app-context";
+import { beanName } from "@/runtime/context";
 import type { ClassDecoratorLike } from "./types";
 
 /**
@@ -11,6 +12,6 @@ import type { ClassDecoratorLike } from "./types";
  */
 export function Service(name?: string): ClassDecoratorLike {
   return (target) => {
-    registerBean(target, name);
+    appContext.registerBean(name ?? beanName(target), target);
   };
 }

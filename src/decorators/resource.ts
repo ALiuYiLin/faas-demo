@@ -1,4 +1,4 @@
-import { registerInject } from "@/container/metadata";
+import { registerInject } from "@/runtime/context";
 import type { PropertyDecoratorLike } from "./types";
 
 /**
@@ -17,8 +17,7 @@ export type ResourceDecorator = {
  * ```ts
  * @Controller("/users")
  * class UserController {
- *   @Resource private userService!: UserService;          // 按属性名找 bean
- *   @Resource("cacheService") private cache!: Cache;      // 显式指定 bean 名
+ *   @Resource private userService!: UserService;
  * }
  * ```
  *

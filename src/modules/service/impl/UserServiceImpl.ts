@@ -1,5 +1,5 @@
+import { Service } from "@faas/runtime";
 import { randomUUID } from "node:crypto";
-import { Service } from "@/decorators";
 import type { CreateUserInput, User } from "@/modules/entity/User";
 import { UserService } from "../UserService";
 
