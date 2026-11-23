@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, stat } from "node:fs/promises";
 import path from "node:path";
 import vm from "node:vm";
 import express, { type Router } from "express";
@@ -151,7 +151,13 @@ export class Registry {
     }
 
     const type = capture.controllers[0];
-    if (!type) throw new Error(`[registry] controller 产物 ${name} 没有注册 @Controller`);
+    if (!type) {
+      throw new Error(
+        `[registry] controller 产物 ${name} 没有注册 @Controller。` +
+          `最常见的原因是产物过期或源码为空（bundle 里没有任何装饰器调用），` +
+          `重跑 pnpm build:modules 即可`,
+      );
+    }
     if (typeof exported !== "function") {
       throw new Error(`[registry] controller 产物 ${name} 的默认导出不是 router`);
     }
@@ -257,12 +263,31 @@ export class Registry {
   }
 
   private async handleFileChange(relative: string): Promise<void> {
+    // 文件被删除、构建失败……都不能让平台挂掉：兜住一切异常，保留当前可用的版本
+    try {
+      await this.applyChange(relative);
+    } catch (error) {
+      console.error(
+        `[registry] 处理变更失败，保留现有版本（${relative}）：` +
+          `${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  private async applyChange(relative: string): Promise<void> {
+    // 删除：入口文件消失 → 全量重扫，产物随之从 registry 移除
+    if (!(await this.fileExists(path.join(ROOT, relative)))) {
+      console.log(`[registry] ${relative} 已删除，重新扫描`);
+      await this.rescan();
+      return;
+    }
+
     const serviceHits = [...this.services.values()].filter((record) => relative in record.deps);
     const controllerHits = [...this.controllers.values()].filter((record) => relative in record.deps);
 
     if (serviceHits.length === 0 && controllerHits.length === 0) {
       if (this.isHotZone(relative)) {
-        console.log(`[registry] ${relative} 是新增/删除的入口，全量重建`);
+        console.log(`[registry] ${relative} 是新增的入口，全量重建`);
         await this.rescan();
       }
       return;
@@ -281,12 +306,37 @@ export class Registry {
     for (const record of controllerHits) await this.reloadController(record.name);
   }
 
+  private async fileExists(file: string): Promise<boolean> {
+    try {
+      return (await stat(file)).isFile();
+    } catch {
+      return false;
+    }
+  }
+
   private isHotZone(relative: string): boolean {
     return relative.startsWith(`${toPosix(path.relative(ROOT, MODULES))}/`);
   }
 
   private async rescan(): Promise<void> {
     this.manifest = await buildAll();
+
+    // 产物消失（源码被删）→ 从 registry 移除并重建路由表
+    for (const [name, record] of [...this.controllers]) {
+      if (!this.manifest.controllers[name]) {
+        this.controllers.delete(name);
+        appContext.forget(record.type);
+        console.log(`[registry] 已移除 controller ${name}`);
+      }
+    }
+    for (const [name, record] of [...this.services]) {
+      if (!this.manifest.services[name]) {
+        this.services.delete(name);
+        appContext.removeBean(record.beanName);
+        console.log(`[registry] 已移除 service ${name}`);
+      }
+    }
+
     for (const [name, info] of Object.entries(this.manifest.services)) {
       const current = this.services.get(name);
       if (!current || current.version !== info.version) await this.loadService(name, info);

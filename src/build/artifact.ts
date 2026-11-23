@@ -167,6 +167,7 @@ export async function buildAll(): Promise<Manifest> {
   await mkdir(DIST, { recursive: true });
 
   const entries = (await walk(MODULES)).filter((file) => entryKind(file) !== null);
+  const previous = await readManifest();
   const manifest: Manifest = {
     manifestVersion: 1,
     builtAt: new Date().toISOString(),
@@ -176,12 +177,27 @@ export async function buildAll(): Promise<Manifest> {
   };
 
   for (const file of entries) {
-    const built = await buildArtifact(file);
-    const target = path.join(DIST, built.info.file);
-    await mkdir(path.dirname(target), { recursive: true });
-    await writeFile(target, built.code, "utf8");
-    if (built.kind === "controller") manifest.controllers[built.name] = built.info;
-    else manifest.services[built.name] = built.info;
+    const kind = entryKind(file);
+    const name = path.basename(file, path.extname(file));
+    try {
+      const built = await buildArtifact(file);
+      const target = path.join(DIST, built.info.file);
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(target, built.code, "utf8");
+      if (built.kind === "controller") manifest.controllers[built.name] = built.info;
+      else manifest.services[built.name] = built.info;
+    } catch (error) {
+      // 单个产物构建失败（例如依赖的文件被删）不应该拖垮整次构建：
+      // 保留上一版产物继续服务，其余产物照常更新
+      const old = kind === "controller" ? previous?.controllers[name] : previous?.services[name];
+      console.error(
+        `[build] ${name} 构建失败：${error instanceof Error ? error.message.split("\n")[0] : String(error)}` +
+          (old ? "（保留上一版）" : "（跳过）"),
+      );
+      if (!old) continue;
+      if (kind === "controller") manifest.controllers[name] = old;
+      else manifest.services[name] = old;
+    }
   }
 
   await writeManifest(manifest);
