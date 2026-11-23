@@ -1,15 +1,6 @@
-import express from "express";
+import { buildRouter } from "@/container";
+import { UserController } from "@/modules/controller/UserController";
+// 类型导入会被擦除，这里必须显式加载实现类，@Service 才会注册 bean
+import "@/modules/service/impl/UserServiceImpl";
 
-const router = express.Router()
-
-router.get('/users',(req, res)=>{
-  const users = [
-    'bob',
-    'alice',
-    'tom'
-  ]
-  res.json({version: 'v2',users})
-})
-
-
-export default router
+export default buildRouter({ controllers: [UserController] });

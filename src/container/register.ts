@@ -1,6 +1,13 @@
 import express, { type Express, type RequestHandler, type Router } from "express";
 import { Container } from "./container";
-import { classMeta, getControllers, isRegisteredBean, registerBean } from "./metadata";
+import {
+  classMeta,
+  getControllers,
+  isRegisteredBean,
+  registerBean,
+  type ParamMeta,
+  type RouteMeta,
+} from "./metadata";
 
 export interface MountOptions {
   /** 挂载前缀，如 "/api"；缺省挂在根路径 */
@@ -27,7 +34,7 @@ export function buildRouter(options: MountOptions = {}): Router {
     const sub = express.Router();
 
     for (const route of meta.routes) {
-      const handler = handlerFor(instance, route.handler);
+      const handler = handlerFor(instance, route, meta.params.get(route.handler) ?? []);
       const path = normalizePath(route.path);
       if (route.method === "get") sub.get(path, handler);
       else sub.post(path, handler);
@@ -56,17 +63,26 @@ export function mount(app: Express, options: MountOptions = {}): Container {
 }
 
 /**
- * 包一层：把 this 绑回实例、统一 await、把返回值序列化成响应。
- * 处理函数自己写了响应（res.send/json/end）时不再重复写。
+ * 包一层：组装参数（@Param / @Body）、把 this 绑回实例、统一 await、
+ * 把返回值序列化成响应。处理函数自己写了响应时不再重复写。
  */
-function handlerFor(instance: unknown, key: string | symbol): RequestHandler {
+function handlerFor(instance: unknown, route: RouteMeta, params: ParamMeta[]): RequestHandler {
   return async (req, res, next) => {
     try {
+      const key = route.handler;
       const method = (instance as Record<string | symbol, (...args: any[]) => unknown>)[key];
       if (typeof method !== "function") {
         throw new Error(`[router] ${key.toString()} 不是方法`);
       }
-      const result = await method.call(instance, req, res, next);
+
+      // 按参数装饰器的位置组装实参，再把 req/res/next 追加在最后
+      const args: unknown[] = [];
+      for (const param of params) {
+        args[param.index] =
+          param.kind === "body" ? req.body : req.params[param.name ?? ""];
+      }
+
+      const result = await method.call(instance, ...args, req, res, next);
       if (res.headersSent || res.writableEnded) return;
       if (result === undefined) return;
       if (typeof result === "string" || Buffer.isBuffer(result)) res.send(result);

@@ -20,11 +20,27 @@ export interface InjectMeta {
   ref?: string;
 }
 
+export type ParamKind = "param" | "body";
+
+export interface ParamMeta {
+  /** 参数来源：路径参数 / 请求体 */
+  kind: ParamKind;
+  /** 参数在方法签名里的位置 */
+  index: number;
+  /** @Param 的参数名，对应路由里的 `:name` */
+  name?: string;
+}
+
 export interface ClassMeta {
   /** @Controller 的挂载路径；undefined 表示不是控制器 */
   path?: string;
   routes: RouteMeta[];
   injects: InjectMeta[];
+  /**
+   * handler -> 参数装饰器信息。
+   * 参数装饰器先于方法装饰器执行，所以不能直接挂在 RouteMeta 上。
+   */
+  params: Map<string | symbol, ParamMeta[]>;
 }
 
 const classMetas = new Map<Function, ClassMeta>();
@@ -34,7 +50,7 @@ const beans = new Map<string, Function>();
 export function classMeta(type: Function): ClassMeta {
   let meta = classMetas.get(type);
   if (!meta) {
-    meta = { routes: [], injects: [] };
+    meta = { routes: [], injects: [], params: new Map() };
     classMetas.set(type, meta);
   }
   return meta;
@@ -55,6 +71,18 @@ export function registerRoute(
 
 export function registerInject(type: Function, property: string | symbol, ref?: string): void {
   classMeta(type).injects.push({ property, ref });
+}
+
+/** 记录方法参数上的 @Param / @Body */
+export function registerParam(
+  type: Function,
+  handler: string | symbol,
+  param: ParamMeta,
+): void {
+  const params = classMeta(type).params;
+  const list = params.get(handler) ?? [];
+  list.push(param);
+  params.set(handler, list);
 }
 
 /**

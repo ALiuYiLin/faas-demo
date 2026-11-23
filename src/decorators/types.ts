@@ -16,3 +16,10 @@ export type MethodDecoratorLike = (
 
 /** 属性装饰器：`@Resource`、`@Resource("name")` */
 export type PropertyDecoratorLike = (target: any, propertyKey: string | symbol) => void;
+
+/** 参数装饰器：`@Param("id")`、`@Body()`（构造参数时 propertyKey 为 undefined） */
+export type ParameterDecoratorLike = (
+  target: any,
+  propertyKey: string | symbol | undefined,
+  parameterIndex: number,
+) => void;

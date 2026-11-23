@@ -1,7 +1,5 @@
 import express, { type ErrorRequestHandler } from "express";
-import { mount } from "@/container";
-import { UserController } from "@/modules/controller/UserController";
-import { UserServiceImpl } from "@/modules/service/impl/UserServiceImpl";
+import { HotLoader } from "@/hot-loader";
 
 const app = express();
 const port = Number(process.env.PORT ?? 3000);
@@ -12,12 +10,21 @@ app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
 });
 
-// 静态注册：装饰器在模块求值时已写好元数据，这里负责实例化、注入并挂路由。
-// beans 里显式列出实现类，既是兜底注册，也让人一眼看到依赖。
-mount(app, {
-  prefix: "/api",
-  controllers: [UserController],
-  beans: [UserServiceImpl],
+// 控制器通过热加载入口（src/router/index.ts）装配：
+// loader 会把 `@/` 和相对导入的源码打包进 vm 沙箱执行，
+// 装饰器写入的仍是宿主这份元数据注册表（@/decorators、@/container 被映射回宿主实例）。
+const loader = new HotLoader();
+await loader.checkAndSwap().catch((error) => {
+  console.error("[hot-loader] 首次编译失败:", error);
+});
+
+app.use("/api", async (req, res, next) => {
+  const router = loader.getRouter();
+  if (!router) {
+    res.status(503).json({ error: "business module not ready" });
+    return;
+  }
+  router(req, res, next);
 });
 
 // 统一错误出口：控制器里抛出的异常都以 JSON 返回

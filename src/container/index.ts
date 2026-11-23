@@ -10,4 +10,11 @@ export {
   getControllers,
   registerBean,
 } from "./metadata";
-export type { ClassMeta, HttpMethod, InjectMeta, RouteMeta } from "./metadata";
+export type {
+  ClassMeta,
+  HttpMethod,
+  InjectMeta,
+  ParamKind,
+  ParamMeta,
+  RouteMeta,
+} from "./metadata";
