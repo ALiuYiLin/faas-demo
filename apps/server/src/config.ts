@@ -45,6 +45,12 @@ export const REMOTE_POLL_MS = Number(process.env.REMOTE_POLL_MS ?? 30_000);
 
 export const REMOTE_CONCURRENCY = Number(process.env.REMOTE_CONCURRENCY ?? 4);
 
+/** 同步成功后是否清理过期产物 */
+export const PRUNE_ON_SYNC = process.env.PRUNE_ON_SYNC !== "false";
+
+/** 本地缓存保留几代（current + N-1） */
+export const KEEP_GENERATIONS = Number(process.env.KEEP_GENERATIONS ?? 2);
+
 export const ADMIN_TOKEN = process.env.ADMIN_TOKEN || undefined;
 
 export const PORT = Number(process.env.PORT ?? 3000);

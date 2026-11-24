@@ -1,18 +1,38 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import type { Manifest } from "@faas/core";
+import type { ArtifactInfo, Manifest } from "@faas/core";
 import { createOssClient, type OssConfig } from "./oss-client";
+import {
+  archiveManifest,
+  fetchManifestVersion,
+  fetchRemoteManifest,
+  isArchiveKey,
+  listManifestVersions,
+  listObjects,
+  MANIFEST_FILE,
+  manifestVersion,
+  versionFromArchiveKey,
+  type OssIo,
+} from "./manifests";
 
 export interface UploadModulesConfig extends OssConfig {
   /** 本地构建产物目录，通常就是 dist/modules */
   distDir: string;
-  /** 远端前缀，如 `10coding-project/faas-demo/modules` */
+  /** 远端前缀，如 `faas-demo/modules` */
   prefix: string;
-  /** 只打印计划，不真正上传 */
+  /** 只打印计划，不真正上传/删除 */
   dryRun?: boolean;
   /** 并发上传数，默认 4 */
   concurrency?: number;
+  /** 上传完成后清理远端过期产物，默认 false */
+  prune?: boolean;
+  /** 清理时对象至少闲置多久（毫秒），默认 10 分钟；给其它实例留出切换时间 */
+  pruneGraceMs?: number;
+  /** 保留多少代 manifest（含当前），默认 2 */
+  keepGenerations?: number;
+  /** 只打印将被删除的对象 */
+  pruneDryRun?: boolean;
   log?: (message: string) => void;
 }
 
@@ -20,21 +40,34 @@ export interface UploadModulesResult {
   uploaded: string[];
   skipped: string[];
   total: number;
+  /** 本次归档的 manifest 历史版本 id */
+  version: string;
+  /** 被删除（或 dry-run 下将被删除）的对象 */
+  pruned: string[];
+}
+
+interface UploadClient extends OssIo {
+  put(key: string, content: Buffer | string): Promise<unknown>;
 }
 
 /**
  * 把 `dist/modules` 上传到 OSS。
  *
- * - 以 manifest 里列出的产物为准，本地缺文件直接报错（避免传上去一个指向空文件的 manifest）；
- * - 内容 MD5 与远端 ETag 一致就跳过（单次 PUT 的 ETag 就是内容 MD5）；
- * - **manifest.json 最后传**：任何时刻远端 manifest 都只指向已经上传完成的 bundle。
+ * - manifest 是唯一事实来源：本地缺文件直接报错；
+ * - 内容 MD5 与远端 ETag 一致就跳过；
+ * - 先传 bundle，再归档 manifest 历史，最后传 manifest.json；
+ * - 可选 `prune`：只保留最近 N 代 manifest 引用的 bundle，并且只删闲置超过宽限期的对象。
  */
 export async function uploadModules(config: UploadModulesConfig): Promise<UploadModulesResult> {
   const log = config.log ?? ((message: string) => console.log(message));
   const prefix = config.prefix.replace(/\/+$/, "");
+  const dryRun = config.dryRun === true;
 
   const manifestPath = path.join(config.distDir, "manifest.json");
-  const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as Manifest;
+  // 直接读原文：版本 id 必须和上传内容完全一致
+  const json = await readFile(manifestPath, "utf8");
+  const manifest = JSON.parse(json) as Manifest;
+  const version = manifestVersion(json);
 
   const artifacts = [
     ...Object.values(manifest.controllers).map((info) => info.file),
@@ -50,10 +83,19 @@ export async function uploadModules(config: UploadModulesConfig): Promise<Upload
     }
   }
 
-  const client = createOssClient(config) as UploadClient;
-  const result: UploadModulesResult = { uploaded: [], skipped: [], total: artifacts.length + 1 };
+  const client = createOssClient(config) as unknown as UploadClient;
+  const result: UploadModulesResult = {
+    uploaded: [],
+    skipped: [],
+    total: artifacts.length + 1,
+    version,
+    pruned: [],
+  };
 
-  // 先传 bundle（并发），最后传 manifest
+  // 上一版远端 manifest：清理时要保留它引用的文件
+  const previous = await fetchRemoteManifest(client, prefix).catch(() => null);
+
+  // 1) bundle（并发）
   const queue = [...artifacts];
   const concurrency = Math.max(1, config.concurrency ?? 4);
   await Promise.all(
@@ -63,9 +105,125 @@ export async function uploadModules(config: UploadModulesConfig): Promise<Upload
       }
     }),
   );
-  await uploadOne(client, config, prefix, "manifest.json", log, result);
+
+  // 2) manifest 历史（回滚依据），3) 当前 manifest（最后）
+  if (dryRun) {
+    log(`[upload] (dry-run) 将归档 manifests/${version}.json`);
+  } else {
+    await archiveManifest(client, prefix, json);
+  }
+  await uploadOne(client, config, prefix, MANIFEST_FILE, log, result);
+
+  // 4) 清理
+  if (config.prune) {
+    result.pruned = await pruneRemote(client, config, prefix, {
+      version,
+      artifacts,
+      previousManifest: previous?.manifest,
+      log,
+    });
+  }
 
   return result;
+}
+
+/** 把某个历史版本重新发布成当前 manifest；各实例轮询到 ETag 变化后会自行回滚 */
+export async function rollbackModules(
+  config: Pick<UploadModulesConfig, "region" | "bucket" | "endpoint" | "accessKeyId" | "accessKeySecret" | "secure" | "timeout" | "prefix" | "dryRun" | "log">,
+  version: string,
+): Promise<Manifest> {
+  const log = config.log ?? ((message: string) => console.log(message));
+  const prefix = config.prefix.replace(/\/+$/, "");
+  const client = createOssClient(config) as unknown as UploadClient;
+
+  const target = await fetchManifestVersion(client, prefix, version);
+  if (!target) {
+    throw new Error(`[rollback] 历史版本 ${version} 不存在（${prefix}/manifests/${version}.json）`);
+  }
+  if (config.dryRun) {
+    log(`[rollback] (dry-run) 将把 ${version} 重新发布为当前 manifest`);
+    return target;
+  }
+
+  const json = `${JSON.stringify(target, null, 2)}\n`;
+  await client.put(`${prefix}/${MANIFEST_FILE}`, Buffer.from(json, "utf8"));
+  log(`[rollback] 已把 ${version} 发布为当前 manifest（各实例将在下一次轮询后回滚）`);
+  return target;
+}
+
+async function pruneRemote(
+  client: UploadClient,
+  config: UploadModulesConfig,
+  prefix: string,
+  options: {
+    version: string;
+    artifacts: string[];
+    previousManifest?: Manifest;
+    log: (message: string) => void;
+  },
+): Promise<string[]> {
+  const log = options.log;
+  const keepGenerations = Math.max(1, config.keepGenerations ?? 2);
+  const graceMs = config.pruneGraceMs ?? 10 * 60_000;
+  const dryRun = config.pruneDryRun === true || config.dryRun === true;
+
+  const versions = await listManifestVersions(client, prefix);
+  const keepVersions = new Set(
+    versions.slice(0, keepGenerations).map((entry) => entry.version),
+  );
+  keepVersions.add(options.version);
+
+  const keepFiles = new Set(options.artifacts);
+  const addFiles = (manifest: Manifest | null | undefined) => {
+    if (!manifest) return;
+    for (const info of [
+      ...Object.values(manifest.controllers) as ArtifactInfo[],
+      ...Object.values(manifest.services) as ArtifactInfo[],
+    ]) {
+      keepFiles.add(info.file);
+    }
+  };
+  addFiles(options.previousManifest);
+
+  // 保留窗口内的历史 manifest 所引用的文件也不能删
+  for (const version of keepVersions) {
+    addFiles(await fetchManifestVersion(client, prefix, version));
+  }
+
+  const objects = await listObjects(client, prefix);
+  const cutoff = Date.now() - graceMs;
+
+  const doomed = objects.filter((object) => {
+    const archive = isArchiveKey(object.relative);
+    const bundle = /^(controller|service)\/[^/]+\.js$/.test(object.relative);
+    if (!archive && !bundle) return false;
+    if (archive) {
+      if (keepVersions.has(versionFromArchiveKey(object.relative))) return false;
+    } else if (keepFiles.has(object.relative)) {
+      return false;
+    }
+
+    const timestamp = object.lastModified ? Date.parse(object.lastModified) : Number.NaN;
+    // 没有时间戳就不删，宽限期内也不删
+    return Number.isFinite(timestamp) && timestamp < cutoff;
+  });
+
+  const names = doomed.map((object) => object.relative);
+  if (names.length === 0) {
+    log(`[prune] 没有需要清理的对象（保留 ${keepVersions.size} 代）`);
+    return [];
+  }
+
+  if (dryRun) {
+    for (const name of names) log(`[prune] (dry-run) 将删除 ${name}`);
+    return names;
+  }
+
+  for (const name of names) {
+    await client.delete(`${prefix}/${name}`);
+    log(`[prune] 已删除 ${name}`);
+  }
+  return names;
 }
 
 async function uploadOne(
@@ -97,7 +255,7 @@ async function uploadOne(
 async function headEtag(client: UploadClient, key: string): Promise<string | null> {
   try {
     const result = await client.head(key);
-    const headers = result.res?.headers as Record<string, string | undefined> | undefined;
+    const headers = result.res?.headers;
     const etag = headers?.["etag"] ?? headers?.["ETag"] ?? "";
     return String(etag).replace(/"/g, "");
   } catch (error) {
@@ -106,10 +264,4 @@ async function headEtag(client: UploadClient, key: string): Promise<string | nul
     }
     throw error;
   }
-}
-
-/** 只用到 head / put，避免依赖 ali-oss 的完整类型 */
-interface UploadClient {
-  head(key: string): Promise<{ res?: { headers?: object } }>;
-  put(key: string, content: Buffer): Promise<unknown>;
 }

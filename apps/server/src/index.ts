@@ -1,3 +1,4 @@
+import type express from "express";
 import { createApp, createManifestStore, Registry } from "@faas/core";
 import {
   RemoteBuilder,
@@ -10,10 +11,12 @@ import {
   ADMIN_TOKEN,
   BASE_PATH,
   DIST_DIR,
+  KEEP_GENERATIONS,
   MODULES_DIR,
   MODULES_SOURCE,
   OSS_PREFIX,
   PORT,
+  PRUNE_ON_SYNC,
   REMOTE_CONCURRENCY,
   REMOTE_POLL_MS,
   ROOT,
@@ -71,6 +74,8 @@ async function createRegistry(): Promise<Registry> {
     prefix: OSS_PREFIX,
     distDir: DIST_DIR,
     concurrency: REMOTE_CONCURRENCY,
+    prune: PRUNE_ON_SYNC,
+    keepGenerations: KEEP_GENERATIONS,
   });
 
   let first: SyncResult;
@@ -106,9 +111,14 @@ const registry = await createRegistry();
 
 const app = createApp(registry, { basePath: BASE_PATH });
 
+/** 设置了 ADMIN_TOKEN 时，/__admin/* 需要 Bearer token */
+function authorized(req: express.Request): boolean {
+  return !ADMIN_TOKEN || req.headers.authorization === `Bearer ${ADMIN_TOKEN}`;
+}
+
 /** webhook / 运维入口：手动触发一次同步并换版 */
 app.post("/__admin/sync", async (req, res) => {
-  if (ADMIN_TOKEN && req.headers.authorization !== `Bearer ${ADMIN_TOKEN}`) {
+  if (!authorized(req)) {
     res.status(401).json({ error: "unauthorized" });
     return;
   }
@@ -116,6 +126,28 @@ app.post("/__admin/sync", async (req, res) => {
   const result = await runSync();
   if (result.changed) await registry.applyManifest(result.manifest);
   res.json({ changed: result.changed, etag: result.etag, downloaded: result.downloaded });
+});
+
+/** 回滚到上一代（本地缓存里的 manifest.prev.json），不动远端 */
+app.post("/__admin/rollback", async (req, res) => {
+  if (!authorized(req)) {
+    res.status(401).json({ error: "unauthorized" });
+    return;
+  }
+  if (!sync) {
+    res.status(409).json({ error: "MODULES_SOURCE=dir 没有上一代可回滚" });
+    return;
+  }
+
+  const result = await sync.rollback();
+  if (!result) {
+    res.status(404).json({ error: "没有可回滚的上一版（manifest.prev.json 不存在）" });
+    return;
+  }
+
+  await registry.applyManifest(result.manifest);
+  console.log(`[app] 已回滚：${result.manifest.builtAt}（替换掉 ${result.previous.builtAt}）`);
+  res.json({ rolledBackTo: result.manifest.builtAt, replaced: result.previous.builtAt });
 });
 
 app.listen(PORT, () => {

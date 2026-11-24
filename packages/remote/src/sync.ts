@@ -2,16 +2,21 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { assertCompatible, type ArtifactInfo, type Manifest } from "@faas/core";
+import { pruneDistDir } from "./prune";
 import type { ArtifactSource } from "./source";
 
 export interface RemoteSyncConfig {
   source: ArtifactSource;
-  /** 远端前缀，如 `10coding-project/faas-demo/modules` */
+  /** 远端前缀，如 `faas-demo/modules` */
   prefix: string;
   /** 本地缓存目录（同时是产物目录） */
   distDir: string;
   /** 并发下载数，默认 4 */
   concurrency?: number;
+  /** 同步成功后是否清理过期产物，默认 true */
+  prune?: boolean;
+  /** 保留几代（current + N-1），默认 2；1 表示不留上一版（无法回滚） */
+  keepGenerations?: number;
   log?: (message: string) => void;
 }
 
@@ -25,13 +30,22 @@ export interface SyncResult {
   downloaded: number;
 }
 
+export interface RollbackResult {
+  /** 回滚后生效的 manifest */
+  manifest: Manifest;
+  /** 被替换掉的那一版（现在是 previous） */
+  previous: Manifest;
+}
+
 /**
  * 远端同步：一次 HEAD 判断要不要干活，然后只下载 version 变了的产物。
  *
- * 落盘顺序：先 bundle、最后 manifest —— 任何时刻 manifest 都只指向已经存在的文件。
+ * 落盘顺序：先 bundle、再 manifest.prev、最后 manifest —— 任何时刻 manifest 都只指向已存在的文件。
+ * 同步成功后按 `keepGenerations` 清理过期产物（默认保留 current + previous）。
  */
 export class RemoteSync {
   private readonly manifestFile: string;
+  private readonly previousManifestFile: string;
   private readonly etagFile: string;
   private readonly log: (message: string) => void;
   private lastEtag: string | null = null;
@@ -39,6 +53,7 @@ export class RemoteSync {
 
   constructor(private readonly config: RemoteSyncConfig) {
     this.manifestFile = path.join(config.distDir, "manifest.json");
+    this.previousManifestFile = path.join(config.distDir, "manifest.prev.json");
     this.etagFile = path.join(config.distDir, ".etag");
     this.log = config.log ?? ((message) => console.log(message));
   }
@@ -46,6 +61,11 @@ export class RemoteSync {
   /** 上一次同步拿到的 manifest（RemoteBuilder 用） */
   get current(): Manifest | null {
     return this.cachedManifest;
+  }
+
+  /** 上一代 manifest（回滚用），没有则 null */
+  async previous(): Promise<Manifest | null> {
+    return this.readPreviousManifest();
   }
 
   async sync(options: { force?: boolean } = {}): Promise<SyncResult> {
@@ -70,19 +90,70 @@ export class RemoteSync {
     const manifest = JSON.parse(raw.toString("utf8")) as Manifest;
     assertCompatible(manifest);
 
-    const upserts = diffArtifacts(this.cachedManifest, manifest);
+    const previous = this.cachedManifest;
+    const upserts = diffArtifacts(previous, manifest);
     const downloaded = await this.downloadAll(upserts);
 
-    await this.writeAtomic(this.manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
+    // 轮转上一代：回滚依赖它
+    if (previous && this.keepGenerations > 1) {
+      await this.writeAtomic(this.previousManifestFile, serialize(previous));
+    }
+
+    await this.writeAtomic(this.manifestFile, serialize(manifest));
     await this.writeAtomic(this.etagFile, etag);
 
     this.cachedManifest = manifest;
     this.lastEtag = etag;
+
     this.log(
       `[remote] manifest ${etag.slice(0, 8)}：${upserts.length} 个产物更新，下载 ${downloaded} 个`,
     );
 
+    await this.prune(previous ? [manifest, previous] : [manifest]);
+
     return { manifest, changed: upserts.length > 0, etag, downloaded };
+  }
+
+  /**
+   * 回滚到上一代。
+   *
+   * 不动 `.etag`：远端没有发布新版本时，之后的 sync 会把当前（回滚后的）manifest 当成最新，
+   * 不会被立刻拉回新版本；等远端再次发布才会前进。
+   */
+  async rollback(): Promise<RollbackResult | null> {
+    const current = this.cachedManifest ?? (await this.readCachedManifest());
+    if (!current) return null;
+
+    const previous = await this.readPreviousManifest();
+    if (!previous) return null;
+
+    await this.writeAtomic(this.previousManifestFile, serialize(current));
+    await this.writeAtomic(this.manifestFile, serialize(previous));
+    this.cachedManifest = previous;
+
+    this.log(`[remote] 回滚到上一版（builtAt=${previous.builtAt}）`);
+    await this.prune([previous, current]);
+
+    return { manifest: previous, previous: current };
+  }
+
+  private get keepGenerations(): number {
+    return Math.max(1, this.config.keepGenerations ?? 2);
+  }
+
+  private async prune(manifests: Manifest[]): Promise<void> {
+    if (this.config.prune === false) return;
+    try {
+      const result = await pruneDistDir({ distDir: this.config.distDir, keepManifests: manifests });
+      if (result.removed.length > 0) {
+        this.log(
+          `[remote] 清理 ${result.removed.length} 个过期产物（${(result.bytes / 1024).toFixed(1)} KB）`,
+        );
+      }
+    } catch (error) {
+      // 清理是后台动作，失败不影响本次同步
+      this.log(`[remote] 清理失败（忽略）：${error instanceof Error ? error.message : error}`);
+    }
   }
 
   private key(relative: string): string {
@@ -128,11 +199,11 @@ export class RemoteSync {
   }
 
   private async readCachedManifest(): Promise<Manifest | null> {
-    try {
-      return JSON.parse(await readFile(this.manifestFile, "utf8")) as Manifest;
-    } catch {
-      return null;
-    }
+    return readManifestFile(this.manifestFile);
+  }
+
+  private async readPreviousManifest(): Promise<Manifest | null> {
+    return readManifestFile(this.previousManifestFile);
   }
 
   private async readCachedEtag(): Promise<string | null> {
@@ -141,6 +212,18 @@ export class RemoteSync {
     } catch {
       return null;
     }
+  }
+}
+
+function serialize(manifest: Manifest): string {
+  return `${JSON.stringify(manifest, null, 2)}\n`;
+}
+
+async function readManifestFile(file: string): Promise<Manifest | null> {
+  try {
+    return JSON.parse(await readFile(file, "utf8")) as Manifest;
+  } catch {
+    return null;
   }
 }
 
