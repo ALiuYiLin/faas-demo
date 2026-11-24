@@ -1,40 +1,19 @@
-import OSS from "ali-oss";
 import type { ArtifactSource } from "./source";
+import { createOssClient, type OssConfig } from "./oss-client";
 
-export interface OssSourceConfig {
-  region: string;
-  bucket: string;
-  endpoint?: string;
-  accessKeyId: string;
-  accessKeySecret: string;
-  secure?: boolean;
-  /** 毫秒 */
-  timeout?: number;
-}
-
-interface OssResponse {
-  res?: { status?: number; headers?: Record<string, string> };
-  etag?: string;
-}
+export type OssSourceConfig = OssConfig;
 
 /** 阿里云 OSS 产物源（只读：head + get） */
 export function createOssSource(config: OssSourceConfig): ArtifactSource {
-  const client = new OSS({
-    region: config.region,
-    bucket: config.bucket,
-    endpoint: config.endpoint,
-    accessKeyId: config.accessKeyId,
-    accessKeySecret: config.accessKeySecret,
-    secure: config.secure ?? true,
-    timeout: config.timeout,
-  });
+  const client = createOssClient(config);
 
   return {
     async head(key: string): Promise<string | null> {
       try {
-        const result = (await client.head(key)) as OssResponse;
+        const result = await client.head(key);
+        const headers = result.res.headers as Record<string, string | undefined>;
         // OSS 的 ETag 带双引号；分片上传是 `xxx-N`，这里只做"是否变化"的比对
-        const etag = result.res?.headers?.etag ?? result.etag ?? "";
+        const etag = headers["etag"] ?? headers["ETag"] ?? "";
         return String(etag).replace(/"/g, "");
       } catch (error) {
         if (isNotFound(error)) return null;

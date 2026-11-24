@@ -43,7 +43,7 @@ function createSource(): ArtifactSource {
 
 const prefix =
   process.env.OSS_PREFIX ??
-  `10coding-project/${process.env.PROJECT_NAME ?? "faas-demo"}/modules`;
+  `${process.env.PROJECT_NAME ?? "faas-demo"}/modules`;
 
 const sync = new RemoteSync({
   source: createSource(),
