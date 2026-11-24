@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import type { ArtifactInfo, Manifest } from "@faas/core";
+import type { Manifest } from "@faas/core";
 import { createOssClient, type OssConfig } from "./oss-client";
 import {
   archiveManifest,
@@ -17,7 +17,7 @@ import {
 } from "./manifests";
 
 export interface UploadModulesConfig extends OssConfig {
-  /** 本地构建产物目录，通常就是 dist/modules */
+  /** 本地产物目录，通常就是 dist/modules */
   distDir: string;
   /** 远端前缀，如 `faas-demo/modules` */
   prefix: string;
@@ -27,7 +27,7 @@ export interface UploadModulesConfig extends OssConfig {
   concurrency?: number;
   /** 上传完成后清理远端过期产物，默认 false */
   prune?: boolean;
-  /** 清理时对象至少闲置多久（毫秒），默认 10 分钟；给其它实例留出切换时间 */
+  /** 清理时对象至少闲置多久（毫秒），默认 10 分钟 */
   pruneGraceMs?: number;
   /** 保留多少代 manifest（含当前），默认 2 */
   keepGenerations?: number;
@@ -55,8 +55,8 @@ interface UploadClient extends OssIo {
  *
  * - manifest 是唯一事实来源：本地缺文件直接报错；
  * - 内容 MD5 与远端 ETag 一致就跳过；
- * - 先传 bundle，再归档 manifest 历史，最后传 manifest.json；
- * - 可选 `prune`：只保留最近 N 代 manifest 引用的 bundle，并且只删闲置超过宽限期的对象。
+ * - 先传文件，再归档 manifest 历史，最后传 manifest.json；
+ * - 可选 `prune`：只保留最近 N 代 manifest 引用的文件，且只删闲置超过宽限期的对象。
  */
 export async function uploadModules(config: UploadModulesConfig): Promise<UploadModulesResult> {
   const log = config.log ?? ((message: string) => console.log(message));
@@ -64,18 +64,12 @@ export async function uploadModules(config: UploadModulesConfig): Promise<Upload
   const dryRun = config.dryRun === true;
 
   const manifestPath = path.join(config.distDir, "manifest.json");
-  // 直接读原文：版本 id 必须和上传内容完全一致
   const json = await readFile(manifestPath, "utf8");
   const manifest = JSON.parse(json) as Manifest;
   const version = manifestVersion(json);
 
-  const artifacts = [
-    ...Object.values(manifest.controllers).map((info) => info.file),
-    ...Object.values(manifest.services).map((info) => info.file),
-  ];
-
-  // 本地完整性检查：manifest 引用的文件必须都在
-  for (const file of artifacts) {
+  const files = Object.keys(manifest.files);
+  for (const file of files) {
     try {
       await readFile(path.join(config.distDir, file));
     } catch {
@@ -87,16 +81,14 @@ export async function uploadModules(config: UploadModulesConfig): Promise<Upload
   const result: UploadModulesResult = {
     uploaded: [],
     skipped: [],
-    total: artifacts.length + 1,
+    total: files.length + 1,
     version,
     pruned: [],
   };
 
-  // 上一版远端 manifest：清理时要保留它引用的文件
   const previous = await fetchRemoteManifest(client, prefix).catch(() => null);
 
-  // 1) bundle（并发）
-  const queue = [...artifacts];
+  const queue = [...files];
   const concurrency = Math.max(1, config.concurrency ?? 4);
   await Promise.all(
     Array.from({ length: Math.min(concurrency, queue.length) }, async () => {
@@ -106,7 +98,6 @@ export async function uploadModules(config: UploadModulesConfig): Promise<Upload
     }),
   );
 
-  // 2) manifest 历史（回滚依据），3) 当前 manifest（最后）
   if (dryRun) {
     log(`[upload] (dry-run) 将归档 manifests/${version}.json`);
   } else {
@@ -114,11 +105,10 @@ export async function uploadModules(config: UploadModulesConfig): Promise<Upload
   }
   await uploadOne(client, config, prefix, MANIFEST_FILE, log, result);
 
-  // 4) 清理
   if (config.prune) {
     result.pruned = await pruneRemote(client, config, prefix, {
       version,
-      artifacts,
+      files,
       previousManifest: previous?.manifest,
       log,
     });
@@ -129,7 +119,19 @@ export async function uploadModules(config: UploadModulesConfig): Promise<Upload
 
 /** 把某个历史版本重新发布成当前 manifest；各实例轮询到 ETag 变化后会自行回滚 */
 export async function rollbackModules(
-  config: Pick<UploadModulesConfig, "region" | "bucket" | "endpoint" | "accessKeyId" | "accessKeySecret" | "secure" | "timeout" | "prefix" | "dryRun" | "log">,
+  config: Pick<
+    UploadModulesConfig,
+    | "region"
+    | "bucket"
+    | "endpoint"
+    | "accessKeyId"
+    | "accessKeySecret"
+    | "secure"
+    | "timeout"
+    | "prefix"
+    | "dryRun"
+    | "log"
+  >,
   version: string,
 ): Promise<Manifest> {
   const log = config.log ?? ((message: string) => console.log(message));
@@ -145,8 +147,10 @@ export async function rollbackModules(
     return target;
   }
 
-  const json = `${JSON.stringify(target, null, 2)}\n`;
-  await client.put(`${prefix}/${MANIFEST_FILE}`, Buffer.from(json, "utf8"));
+  await client.put(
+    `${prefix}/${MANIFEST_FILE}`,
+    Buffer.from(`${JSON.stringify(target, null, 2)}\n`, "utf8"),
+  );
   log(`[rollback] 已把 ${version} 发布为当前 manifest（各实例将在下一次轮询后回滚）`);
   return target;
 }
@@ -157,7 +161,7 @@ async function pruneRemote(
   prefix: string,
   options: {
     version: string;
-    artifacts: string[];
+    files: string[];
     previousManifest?: Manifest;
     log: (message: string) => void;
   },
@@ -168,35 +172,28 @@ async function pruneRemote(
   const dryRun = config.pruneDryRun === true || config.dryRun === true;
 
   const versions = await listManifestVersions(client, prefix);
-  const keepVersions = new Set(
-    versions.slice(0, keepGenerations).map((entry) => entry.version),
-  );
+  const keepVersions = new Set(versions.slice(0, keepGenerations).map((entry) => entry.version));
   keepVersions.add(options.version);
 
-  const keepFiles = new Set(options.artifacts);
-  const addFiles = (manifest: Manifest | null | undefined) => {
-    if (!manifest) return;
-    for (const info of [
-      ...Object.values(manifest.controllers) as ArtifactInfo[],
-      ...Object.values(manifest.services) as ArtifactInfo[],
-    ]) {
-      keepFiles.add(info.file);
-    }
-  };
-  addFiles(options.previousManifest);
-
-  // 保留窗口内的历史 manifest 所引用的文件也不能删
+  const keepFiles = new Set(options.files);
+  if (options.previousManifest) {
+    for (const file of Object.keys(options.previousManifest.files)) keepFiles.add(file);
+  }
   for (const version of keepVersions) {
-    addFiles(await fetchManifestVersion(client, prefix, version));
+    const manifest = await fetchManifestVersion(client, prefix, version);
+    if (manifest) for (const file of Object.keys(manifest.files)) keepFiles.add(file);
   }
 
   const objects = await listObjects(client, prefix);
   const cutoff = Date.now() - graceMs;
 
   const doomed = objects.filter((object) => {
+    if (object.relative === MANIFEST_FILE) return false;
+
     const archive = isArchiveKey(object.relative);
-    const bundle = /^(controller|service)\/[^/]+\.js$/.test(object.relative);
-    if (!archive && !bundle) return false;
+    const artifact = object.relative.endsWith(".js");
+    if (!archive && !artifact) return false;
+
     if (archive) {
       if (keepVersions.has(versionFromArchiveKey(object.relative))) return false;
     } else if (keepFiles.has(object.relative)) {

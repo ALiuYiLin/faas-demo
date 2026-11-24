@@ -1,11 +1,10 @@
 import type express from "express";
 import { createApp, createManifestStore, Registry } from "@faas/core";
 import {
-  RemoteBuilder,
   RemoteSync,
-  startPoller,
   createOssSource,
   ossConfigFromEnv,
+  startPoller,
   type SyncResult,
 } from "@faas/remote";
 import {
@@ -23,6 +22,7 @@ import {
   REMOTE_POLL_MS,
   ROOT,
 } from "./config";
+import { startServer } from "./server";
 
 // 本地直接用 .env；部署时用真实环境变量即可
 try {
@@ -54,8 +54,9 @@ async function runSync(): Promise<SyncResult> {
 }
 
 async function createRegistry(): Promise<Registry> {
+  const registry = new Registry({ root: ROOT, modulesDir: MODULES_DIR, distDir: DIST_DIR });
+
   if (MODULES_SOURCE === "dir") {
-    // 产物已经在本地：直接加载
     const manifest = (await store.read()) ?? (await createManifestStore(MODULES_DIR).read());
     if (!manifest) {
       console.error(
@@ -64,13 +65,11 @@ async function createRegistry(): Promise<Registry> {
       );
       process.exit(1);
     }
-    const registry = new Registry({ root: ROOT, modulesDir: MODULES_DIR, distDir: DIST_DIR });
     await registry.loadAll(manifest);
     console.log(`[app] source=dir dist=${DIST_DIR}`);
     return registry;
   }
 
-  // 远端模式：启动时同步一次；失败则退回本地缓存（缓存也没有就退出）
   sync = new RemoteSync({
     source: createOssSource(ossConfigFromEnv()),
     prefix: OSS_PREFIX,
@@ -98,12 +97,6 @@ async function createRegistry(): Promise<Registry> {
     first = { manifest: cached, changed: false, etag: "", downloaded: 0 };
   }
 
-  const registry = new Registry({
-    root: ROOT,
-    modulesDir: MODULES_DIR,
-    distDir: DIST_DIR,
-    builder: new RemoteBuilder(sync, DIST_DIR),
-  });
   await registry.loadAll(first.manifest);
   console.log(`[app] source=oss prefix=${OSS_PREFIX} dist=${DIST_DIR}`);
   return registry;

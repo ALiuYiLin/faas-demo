@@ -1,2 +1,2 @@
-export { buildAll, buildArtifact, createCompiler, entryKind } from "./bundle";
-export type { CompilerConfig } from "./config";
+export { buildAll, compileFile, createCompiler, entryKind } from "./compile";
+export type { CompiledFile, CompilerConfig } from "./compile";

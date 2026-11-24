@@ -5,11 +5,8 @@ export type { OssConfig } from "./oss-client";
 export { createFileSource } from "./file-source";
 export { RemoteSync } from "./sync";
 export type { RemoteSyncConfig, RollbackResult, SyncResult } from "./sync";
-export { RemoteBuilder } from "./remote-builder";
 export { startPoller } from "./poller";
 export type { PollerHandle, PollerOptions } from "./poller";
-export { pruneDistDir } from "./prune";
-export type { PruneOptions, PruneResult } from "./prune";
 export { rollbackModules, uploadModules } from "./upload";
 export type { UploadModulesConfig, UploadModulesResult } from "./upload";
 export {

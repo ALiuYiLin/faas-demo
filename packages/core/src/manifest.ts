@@ -1,36 +1,40 @@
-import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-/** 一个构建产物的描述，写进 manifest */
-export interface ArtifactInfo {
-  /** 入口源码，相对项目根 */
-  entry: string;
-  /** 产物文件，相对 dist 目录 */
+/** 一个编译产物的描述 */
+export interface FileInfo {
+  /** 产物相对路径（相对模块目录），如 controller/UserController.js */
   file: string;
-  /** bundle 内容哈希（sha256 前 16 位），换版判断依据 */
+  /** 源文件相对路径，如 controller/UserController.ts */
+  source: string;
+  /** 产物内容哈希（sha256 前 16 位），兼做完整性校验与换版判断 */
   version: string;
-  /** 打进来的源文件 -> md5（传递闭包），用于增量重建 */
-  deps: Record<string, string>;
 }
 
-export type ArtifactKind = "controller" | "service";
+export interface ManifestEntries {
+  /** controller 入口（相对模块目录的 .js 路径） */
+  controllers: string[];
+  /** service 入口 */
+  services: string[];
+}
 
 export interface Manifest {
-  manifestVersion: 1;
+  manifestVersion: 2;
   builtAt: string;
   /** 兼容的 runtime 版本范围 */
   runtime: string;
-  services: Record<string, ArtifactInfo>;
-  controllers: Record<string, ArtifactInfo>;
+  /** 产物路径 -> 描述 */
+  files: Record<string, FileInfo>;
+  /** 需要主动加载的入口 */
+  entries: ManifestEntries;
 }
 
-/** manifest 是「构建器」和「运行时」之间的契约，读写都从这里走 */
 export interface ManifestStore {
   readonly file: string;
   read(): Promise<Manifest | null>;
   write(manifest: Manifest): Promise<void>;
-  /** 删除 manifest 未引用的旧 bundle */
-  prune(manifest: Manifest): Promise<void>;
+  /** 删除 keep 之外的所有产物（manifest*.json / .etag 永远保留） */
+  prune(manifest: Manifest, keep?: Iterable<string>): Promise<string[]>;
 }
 
 export function createManifestStore(distDir: string): ManifestStore {
@@ -52,36 +56,31 @@ export function createManifestStore(distDir: string): ManifestStore {
       await writeFile(file, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
     },
 
-    async prune(manifest: Manifest): Promise<void> {
-      const keep = new Set(
-        [...Object.values(manifest.controllers), ...Object.values(manifest.services)].map((info) =>
-          path.join(distDir, info.file),
-        ),
-      );
-      for (const kind of ["controller", "service"] as const) {
-        const dir = path.join(distDir, kind);
-        let files: string[];
-        try {
-          files = await readdir(dir);
-        } catch {
+    async prune(manifest: Manifest, keep?: Iterable<string>): Promise<string[]> {
+      const wanted = new Set(Object.keys(manifest.files));
+      for (const extra of keep ?? []) wanted.add(extra);
+
+      const removed: string[] = [];
+      for (const relative of await walk(distDir)) {
+        if (wanted.has(relative)) continue;
+        if (relative === "manifest.json" || relative === "manifest.prev.json" || relative === ".etag") {
           continue;
         }
-        for (const name of files) {
-          const full = path.join(dir, name);
-          if (!keep.has(full)) await rm(full, { force: true });
-        }
+        await rm(path.join(distDir, relative), { force: true });
+        removed.push(relative);
       }
+      return removed;
     },
   };
 }
 
 export function emptyManifest(): Manifest {
   return {
-    manifestVersion: 1,
+    manifestVersion: 2,
     builtAt: new Date().toISOString(),
     runtime: "^1.0.0",
-    services: {},
-    controllers: {},
+    files: {},
+    entries: { controllers: [], services: [] },
   };
 }
 
@@ -90,9 +89,9 @@ export function emptyManifest(): Manifest {
  * 远端下发时尤其重要：模块可能按新 API 编译、平台还是旧版。
  */
 export function assertCompatible(manifest: Manifest, expectedRuntime = "^1.0.0"): void {
-  if (manifest?.manifestVersion !== 1) {
+  if (manifest?.manifestVersion !== 2) {
     throw new Error(
-      `[manifest] 不支持的 manifestVersion：${String(manifest?.manifestVersion)}（只支持 1）`,
+      `[manifest] 不支持的 manifestVersion：${String(manifest?.manifestVersion)}（只支持 2）`,
     );
   }
   const expected = majorOf(expectedRuntime);
@@ -108,3 +107,26 @@ function majorOf(range: string): number {
   const match = /\d+/.exec(range ?? "");
   return match ? Number(match[0]) : Number.NaN;
 }
+
+/** 递归列出目录下的所有文件（相对路径，POSIX 风格） */
+async function walk(dir: string, prefix = ""): Promise<string[]> {
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const files: string[] = [];
+  for (const entry of entries) {
+    const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      files.push(...(await walk(path.join(dir, entry.name), relative)));
+    } else if (entry.isFile()) {
+      files.push(relative);
+    }
+  }
+  return files;
+}
+
+
