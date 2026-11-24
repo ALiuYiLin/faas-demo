@@ -43,6 +43,9 @@ export const OSS_PREFIX = process.env.OSS_PREFIX ?? `${PROJECT_NAME}/modules`;
 
 export const REMOTE_POLL_MS = Number(process.env.REMOTE_POLL_MS ?? 30_000);
 
+/** 轮询失败后的退避上限（毫秒） */
+export const REMOTE_POLL_MAX_MS = Number(process.env.REMOTE_POLL_MAX_MS ?? 300_000);
+
 export const REMOTE_CONCURRENCY = Number(process.env.REMOTE_CONCURRENCY ?? 4);
 
 /** 同步成功后是否清理过期产物 */

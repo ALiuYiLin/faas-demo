@@ -3,6 +3,7 @@ import { createApp, createManifestStore, Registry } from "@faas/core";
 import {
   RemoteBuilder,
   RemoteSync,
+  startPoller,
   createOssSource,
   ossConfigFromEnv,
   type SyncResult,
@@ -18,6 +19,7 @@ import {
   PORT,
   PRUNE_ON_SYNC,
   REMOTE_CONCURRENCY,
+  REMOTE_POLL_MAX_MS,
   REMOTE_POLL_MS,
   ROOT,
 } from "./config";
@@ -157,18 +159,20 @@ app.listen(PORT, () => {
 console.log(`[app] root=${ROOT}`);
 console.log(`[app] modules=${MODULES_DIR}`);
 
-// 轮询：REMOTE_POLL_MS=0 时只靠 webhook
+// 轮询：REMOTE_POLL_MS=0 时只靠 webhook；失败按指数退避，成功即复位
 if (sync && REMOTE_POLL_MS > 0) {
-  setInterval(() => {
-    void runSync()
-      .then(async (result) => {
-        if (!result.changed) return;
-        await registry.applyManifest(result.manifest);
-        console.log(`[app] 轮询换版：manifest ${result.etag.slice(0, 8)}`);
-      })
-      .catch((error) => {
-        console.error("[app] 轮询同步失败:", error instanceof Error ? error.message : error);
-      });
-  }, REMOTE_POLL_MS);
-  console.log(`[app] 轮询间隔 ${REMOTE_POLL_MS}ms`);
+  startPoller({
+    intervalMs: REMOTE_POLL_MS,
+    maxDelayMs: REMOTE_POLL_MAX_MS,
+    run: async () => {
+      const result = await runSync();
+      if (!result.changed) return;
+      await registry.applyManifest(result.manifest);
+      console.log(`[app] 轮询换版：manifest ${result.etag.slice(0, 8)}`);
+    },
+    log: (message) => console.log(message),
+  });
+  console.log(
+    `[app] 轮询间隔 ${REMOTE_POLL_MS}ms（失败指数退避，上限 ${REMOTE_POLL_MAX_MS}ms）`,
+  );
 }

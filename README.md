@@ -166,6 +166,7 @@ MODULES_SOURCE=oss PROJECT_NAME=faas-demo PORT=3000 node dist/server/index.js
 | `MODULES_DIST_DIR` | `<ROOT>/dist/modules` | 产物目录（manifest + bundle） |
 | `PROJECT_NAME` | `faas-demo` | OSS key 前缀：`<PROJECT_NAME>/modules` |
 | `REMOTE_POLL_MS` | `30000` | 轮询间隔；`0` 表示只靠 webhook |
+| `REMOTE_POLL_MAX_MS` | `300000` | 轮询失败时的退避上限（1s→2s→4s… 封顶，成功即复位） |
 | `KEEP_GENERATIONS` | `2` | 本地缓存保留几代（=能否回滚） |
 | `PRUNE_ON_SYNC` | `true` | 同步后是否清理过期产物 |
 | `ADMIN_TOKEN` | 空 | 设置后 `/__admin/*` 需要 `Authorization: Bearer <token>` |
