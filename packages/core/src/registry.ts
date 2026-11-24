@@ -256,7 +256,11 @@ export class Registry {
     await this.applyManifest(manifest);
   }
 
-  private async applyManifest(manifest: Manifest): Promise<void> {
+  /**
+   * 把运行态同步到给定 manifest：加载新增/变更的产物、移除消失的、重建路由表。
+   * 远端下发（OSS 里换了 manifest）直接调它，不需要逐个 reload。
+   */
+  async applyManifest(manifest: Manifest): Promise<void> {
     this.manifest = manifest;
 
     for (const [name, record] of [...this.controllers]) {

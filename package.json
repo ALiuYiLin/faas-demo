@@ -10,7 +10,8 @@
     "build:server": "node scripts/build-server.mjs",
     "build": "pnpm build:modules && pnpm build:server",
     "start": "node dist/server/index.js",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "remote": "vite-node apps/server/src/remote.ts"
   },
   "engines": {
     "node": ">=20"

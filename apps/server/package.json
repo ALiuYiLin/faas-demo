@@ -16,6 +16,7 @@
     "@faas/compiler": "workspace:*",
     "@faas/dev": "workspace:*",
     "@types/express": "^5.0.6",
-    "@types/node": "^24.19.2"
+    "@types/node": "^24.19.2",
+    "@faas/remote": "workspace:*"
   }
 }

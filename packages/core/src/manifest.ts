@@ -84,3 +84,27 @@ export function emptyManifest(): Manifest {
     controllers: {},
   };
 }
+
+/**
+ * 校验 manifest 能不能被当前平台加载。
+ * 远端下发时尤其重要：模块可能按新 API 编译、平台还是旧版。
+ */
+export function assertCompatible(manifest: Manifest, expectedRuntime = "^1.0.0"): void {
+  if (manifest?.manifestVersion !== 1) {
+    throw new Error(
+      `[manifest] 不支持的 manifestVersion：${String(manifest?.manifestVersion)}（只支持 1）`,
+    );
+  }
+  const expected = majorOf(expectedRuntime);
+  const actual = majorOf(manifest.runtime);
+  if (expected !== actual) {
+    throw new Error(
+      `[manifest] 运行时版本不兼容：模块要求 ${manifest.runtime}，平台是 ${expectedRuntime}`,
+    );
+  }
+}
+
+function majorOf(range: string): number {
+  const match = /\d+/.exec(range ?? "");
+  return match ? Number(match[0]) : Number.NaN;
+}
