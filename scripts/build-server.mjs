@@ -21,6 +21,8 @@ const result = await build({
   format: "esm",
   target: "node20",
   sourcemap: true,
+  // urllib 在配置代理时才会 require('proxy-agent')，它是可选依赖；不走代理就永远用不到
+  external: ["proxy-agent"],
   logLevel: "warning",
   banner: {
     // esbuild 打包 CJS 依赖到 ESM 时，动态 require 需要真实 require 兜底

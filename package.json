@@ -11,7 +11,6 @@
     "build": "pnpm build:modules && pnpm build:server",
     "start": "node dist/server/index.js",
     "typecheck": "pnpm -r typecheck",
-    "remote": "vite-node apps/server/src/remote.ts",
     "upload:modules": "vite-node scripts/upload-modules.ts",
     "deploy:modules": "pnpm build:modules && pnpm upload:modules"
   },
