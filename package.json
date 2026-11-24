@@ -5,15 +5,19 @@
   "type": "module",
   "description": "Hot-loadable module platform demo (workspace root)",
   "scripts": {
-    "dev": "pnpm --filter @faas/demo-server dev",
-    "start": "pnpm --filter @faas/demo-server start",
-    "build:modules": "pnpm --filter @faas/demo-server build:modules",
+    "dev": "vite-node apps/server/src/dev.ts",
+    "build:modules": "vite-node apps/server/src/build.ts",
+    "build:server": "node scripts/build-server.mjs",
+    "build": "pnpm build:modules && pnpm build:server",
+    "start": "node dist/server/index.js",
     "typecheck": "pnpm -r typecheck"
   },
   "engines": {
     "node": ">=20"
   },
   "devDependencies": {
-    "typescript": "^5.9.3"
+    "esbuild": "^0.28.2",
+    "typescript": "^5.9.3",
+    "vite-node": "^6.0.0"
   }
 }

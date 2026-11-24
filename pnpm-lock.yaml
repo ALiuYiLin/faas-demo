@@ -8,21 +8,21 @@ importers:
 
   .:
     devDependencies:
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+      vite-node:
+        specifier: ^6.0.0
+        version: 6.0.0(@types/node@24.19.2)(esbuild@0.28.2)(tsx@4.23.15)
 
   apps/server:
     dependencies:
-      '@faas/compiler':
-        specifier: workspace:*
-        version: link:../../packages/compiler
       '@faas/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@faas/dev':
-        specifier: workspace:*
-        version: link:../../packages/dev
       '@faas/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
@@ -30,18 +30,18 @@ importers:
         specifier: ^5.3.0
         version: 5.3.0
     devDependencies:
+      '@faas/compiler':
+        specifier: workspace:*
+        version: link:../../packages/compiler
+      '@faas/dev':
+        specifier: workspace:*
+        version: link:../../packages/dev
       '@types/express':
         specifier: ^5.0.6
         version: 5.0.6
       '@types/node':
         specifier: ^24.19.2
         version: 24.19.2
-      vite:
-        specifier: ^8.3.8
-        version: 8.3.8(@types/node@24.19.2)(esbuild@0.28.2)(tsx@4.23.15)
-      vite-node:
-        specifier: ^6.0.0
-        version: 6.0.0(@types/node@24.19.2)(esbuild@0.28.2)(tsx@4.23.15)
 
   packages/compiler:
     dependencies:

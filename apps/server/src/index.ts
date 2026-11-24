@@ -1,44 +1,48 @@
-import { createCompiler } from "@faas/compiler";
-import { createApp, createManifestStore, Registry } from "@faas/core";
-import { enableHotReload } from "@faas/dev";
-import { APP_SRC, DIST_DIR, MODULES_DIR, ROOT } from "./config";
+import { createManifestStore, Registry } from "@faas/core";
+import { DIST_DIR, MODULES_DIR, ROOT } from "./config";
+import { startServer } from "./server";
 
-// 平台的底线：任何模块层面的异常都不能把进程带走
+// 生产入口：只加载预构建产物，不依赖 compiler / watcher。
+// 构建：pnpm build   →   dist/server/index.js + dist/modules
+// 运行：node dist/server/index.js（或 pnpm start）
+
 process.on("unhandledRejection", (reason) => {
   console.error("[app] 未处理的 Promise 拒绝:", reason);
 });
 
-const port = Number(process.env.PORT ?? 3000);
-const basePath = process.env.BASE_PATH ?? "/api";
-const watching = process.env.WATCH !== "0";
+let distDir = DIST_DIR;
+let manifest = await createManifestStore(distDir).read();
 
-const compiler = createCompiler({
-  root: ROOT,
-  modulesDir: MODULES_DIR,
-  distDir: DIST_DIR,
-  aliases: { "@": APP_SRC },
-});
+// 部署时常见做法：把产物目录整个放到 MODULES_DIR（里面含 manifest.json），
+// 此时不设置 MODULES_DIST_DIR 也能跑。
+if (!manifest && process.env.MODULES_DIR) {
+  const alt = createManifestStore(MODULES_DIR);
+  const altManifest = await alt.read();
+  if (altManifest) {
+    manifest = altManifest;
+    distDir = MODULES_DIR;
+    console.log(`[app] 使用 MODULES_DIR 作为产物目录：${MODULES_DIR}`);
+  }
+}
 
-// 开发模式（默认）：启动时按源码全量重建，不能信任磁盘上的旧 manifest。
-// 线上（WATCH=0）：只读预构建产物，缺失才构建。
-const manifest = watching
-  ? await compiler.buildAll()
-  : ((await createManifestStore(DIST_DIR).read()) ?? (await compiler.buildAll()));
+if (!manifest) {
+  console.error(
+    `[app] 找不到模块产物：${distDir}/manifest.json\n` +
+      `     先执行 pnpm build（或 pnpm build:modules），` +
+      `或用 MODULES_DIST_DIR / MODULES_DIR 指定产物目录`,
+  );
+  process.exit(1);
+}
+
+console.log(`[app] root=${ROOT}`);
+console.log(`[app] modules=${MODULES_DIR}`);
+console.log(`[app] dist=${distDir}`);
 
 const registry = new Registry({
   root: ROOT,
   modulesDir: MODULES_DIR,
-  distDir: DIST_DIR,
-  builder: watching ? compiler : undefined,
+  distDir,
 });
 await registry.loadAll(manifest);
 
-const app = createApp(registry, { basePath });
-app.listen(port, () => {
-  console.log(`listening on http://localhost:${port}${basePath}`);
-});
-
-if (watching) {
-  enableHotReload(registry, { root: ROOT, modulesDir: MODULES_DIR });
-  console.log("[app] 热更新已启用（WATCH=0 可关闭）");
-}
+startServer(registry);

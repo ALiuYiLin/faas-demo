@@ -5,22 +5,17 @@
   "description": "Demo server: wires the platform, builds modules and serves the hot zone",
   "type": "module",
   "scripts": {
-    "dev": "vite-node src/index.ts",
-    "start": "vite-node src/index.ts",
-    "build:modules": "vite-node src/build.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@faas/compiler": "workspace:*",
     "@faas/core": "workspace:*",
-    "@faas/dev": "workspace:*",
     "@faas/runtime": "workspace:*",
     "express": "^5.3.0"
   },
   "devDependencies": {
+    "@faas/compiler": "workspace:*",
+    "@faas/dev": "workspace:*",
     "@types/express": "^5.0.6",
-    "@types/node": "^24.19.2",
-    "vite": "^8.3.8",
-    "vite-node": "^6.0.0"
+    "@types/node": "^24.19.2"
   }
 }
